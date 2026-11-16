@@ -2,7 +2,7 @@ import { hashId, type FinanceDB, type SyncEntry } from '../db';
 
 /** Tables that are shared with the family. "pk" is the primary key field of each. */
 export const SYNCED = [
-  { tbl: 'expenses', pk: 'id' }, { tbl: 'categories', pk: 'id' }, { tbl: 'auditLog', pk: 'id' }, { tbl: 'budgets', pk: 'id' },
+  { tbl: 'expenses', pk: 'id' }, { tbl: 'categories', pk: 'id' }, { tbl: 'auditLog', pk: 'id' }, { tbl: 'budgets', pk: 'id' }, { tbl: 'allowances', pk: 'id' },
   { tbl: 'income', pk: 'id' }, { tbl: 'conversions', pk: 'id' }, { tbl: 'settings', pk: 'key' },
 ] as const;
 type Tbl = (typeof SYNCED)[number]['tbl'];

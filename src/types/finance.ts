@@ -39,6 +39,8 @@ export type AuditRecord = {
 };
 
 export type MonthlyBudget = { id?: number; month: string; amount: number; currency: 'GHS' };
+/** Spending money taken from the GHS balance for a period. endDate '' = still open. amount is the current amount; spent is worked out from expenses. */
+export type Allowance = { id?: number; startDate: string; endDate: string; amount: number; note: string; createdAt: string; updatedAt: string };
 export type IncomeEntry = { id?: number; title: string; amount: number; currency: string; date: string; notes: string };
 
 /** A currency exchange the family actually did: fromAmount fromCurrency became toAmount toCurrency. */
