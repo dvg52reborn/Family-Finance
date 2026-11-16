@@ -1,5 +1,5 @@
 import type { Allowance, Expense } from '../types/finance';
-import { allowanceId } from './db';
+import { allowanceId, db, type FinanceDB } from './db';
 
 /*
  * Allowance rules (spending money taken from the GHS balance for a period). Pure functions: no database, no screens.
@@ -81,4 +81,102 @@ export function renewalFor(list: Allowance[], rule: RenewalRule, today: string, 
   if (!(amount > 0)) return null;
   const startDate = addDays(latest.endDate, 1);
   return { id: allowanceId(startDate), startDate, endDate: '', amount: cents(amount), note: '', createdAt: now, updatedAt: now };
+}
+
+/* ---------- frozen history: the amount an allowance had on a given day ---------- */
+const sumDeltas = (a: Allowance, upTo?: string) => (a.adjustments ?? []).filter((x) => upTo === undefined || x.date <= upTo).reduce((s, x) => s + x.delta, 0);
+/** The amount the allowance was taken with, before any later change. */
+export const startAmount = (a: Allowance) => cents(a.amount - sumDeltas(a));
+/** The amount in force on `date` (0 before the allowance starts). Later changes do not rewrite earlier days. */
+export const amountAsOf = (a: Allowance, date: string) => (date < a.startDate ? 0 : cents(startAmount(a) + sumDeltas(a, date)));
+
+/** Records a new current amount. The change is dated `date` (never before the start), so earlier days keep their figures. */
+export function changeAmount(a: Allowance, amount: number, date: string, now: string): Allowance {
+  const delta = cents(amount - a.amount);
+  if (delta === 0) return a;
+  const at = date < a.startDate ? a.startDate : date;
+  return { ...a, amount: cents(amount), adjustments: [...(a.adjustments ?? []), { date: at, delta }], updatedAt: now };
+}
+
+export const monthStart = (month: string) => `${month}-01`;
+export function monthEnd(month: string): string {
+  const [y, m] = month.split('-').map(Number);
+  return addDays(`${m === 12 ? y + 1 : y}-${pad(m === 12 ? 1 : m + 1)}-01`, -1);
+}
+
+/** Spent on the allowance up to and including `date` (never beyond its own end). */
+export function spentThrough(a: Allowance, date: string, expenses: Expense[]): number {
+  if (date < a.startDate) return 0;
+  return spentOn({ startDate: a.startDate, endDate: a.endDate && a.endDate < date ? a.endDate : date }, expenses);
+}
+/** What the allowance has taken out of the family funds by the end of `date`:
+ *  closed -> only what was spent (the rest is back in funds); still open -> the whole amount, or the spending if that is more. */
+export function costAsOf(a: Allowance, date: string, expenses: Expense[]): number {
+  if (date < a.startDate) return 0;
+  const spent = spentThrough(a, date, expenses);
+  return a.endDate && a.endDate <= date ? spent : Math.max(amountAsOf(a, date), spent);
+}
+/** Spending beyond the amount in force on `date`. */
+export const overAsOf = (a: Allowance, date: string, expenses: Expense[]) =>
+  date < a.startDate ? 0 : cents(Math.max(0, spentThrough(a, date, expenses) - amountAsOf(a, date)));
+/** The part of the overspend that fell in `month` (it becomes that month's automatic "Budget overrun" expense). */
+export function overrunIn(a: Allowance, month: string, expenses: Expense[]): number {
+  const from = monthStart(month), to = monthEnd(month);
+  if (a.startDate > to || (a.endDate && a.endDate < from)) return 0;
+  return cents(Math.max(0, overAsOf(a, to, expenses) - overAsOf(a, addDays(from, -1), expenses)));
+}
+/** The day in `month` on which the overspend first grew. */
+export function overrunDate(a: Allowance, month: string, expenses: Expense[]): string {
+  const base = overAsOf(a, addDays(monthStart(month), -1), expenses);
+  const days = [...new Set(expenses.filter((e) => !e.autoOverrun && !e.outsideBudget && e.date.startsWith(month) && covers(a, e.date)).map((e) => e.date))].sort();
+  return days.find((d) => overAsOf(a, d, expenses) > base) ?? monthEnd(month);
+}
+/** The allowance to show for a month: the newest one that overlaps it. */
+export function allowanceForMonth(month: string, list: Allowance[]): Allowance | undefined {
+  const from = monthStart(month), to = monthEnd(month);
+  return list.filter((a) => a.startDate <= to && (!a.endDate || a.endDate >= from)).sort((x, y) => y.startDate.localeCompare(x.startDate))[0];
+}
+
+/** An end date is refused if it is before the start, or reaches into a later allowance (an empty date reopens it, only if nothing follows). */
+export function checkEndDate(list: Allowance[], a: Allowance, endDate: string): 'ok' | 'before_start' | 'overlap' {
+  if (endDate && endDate < a.startDate) return 'before_start';
+  return list.some((o) => o.id !== a.id && o.startDate > a.startDate && (!endDate || o.startDate <= endDate)) ? 'overlap' : 'ok';
+}
+
+/* ---------- from the old monthly budgets ---------- */
+/** Each old monthly budget becomes an allowance from the 1st to the last day of that month. */
+export function allowancesFromBudgets(budgets: { month: string; amount: number }[], now: string): Allowance[] {
+  const byMonth = new Map<string, number>();
+  for (const b of budgets) if (b.amount > 0) byMonth.set(b.month, b.amount);
+  return [...byMonth.entries()].sort(([x], [y]) => x.localeCompare(y)).map(([month, amount]) => ({
+    id: allowanceId(monthStart(month)), startDate: monthStart(month), endDate: monthEnd(month), amount: cents(amount), note: '', createdAt: now, updatedAt: now,
+  }));
+}
+export const MIGRATED_KEY = 'allowancesMigrated';
+/** Runs once per device: copies the old monthly budgets into allowances (same ids on every device, so nothing doubles). The old budgets stay untouched. */
+export async function migrateBudgets(database: FinanceDB = db): Promise<number> {
+  return database.transaction('rw', database.budgets, database.allowances, database.settings, async () => {
+    if (await database.settings.get(MIGRATED_KEY)) return 0;
+    let n = 0;
+    for (const r of allowancesFromBudgets(await database.budgets.toArray(), new Date().toISOString())) {
+      if (!(await database.allowances.get(r.id!))) { await database.allowances.put(r); n++; }
+    }
+    await database.settings.put({ key: MIGRATED_KEY, value: true });
+    return n;
+  });
+}
+
+/* ---------- automatic renewal ---------- */
+export const RENEWAL_KEY = 'allowanceRenewal';
+export const DEFAULT_RENEWAL: RenewalRule = { enabled: true, useDefault: false, defaultAmount: 0 };
+export const readRenewal = (value: unknown): RenewalRule => ({ ...DEFAULT_RENEWAL, ...(value && typeof value === 'object' ? (value as Partial<RenewalRule>) : {}) });
+/** Takes the automatic renewal if one is due today. Returns it, or null when nothing was due. */
+export async function runRenewal(todayIso: string, database: FinanceDB = db): Promise<Allowance | null> {
+  return database.transaction('rw', database.allowances, database.settings, async () => {
+    const rule = readRenewal((await database.settings.get(RENEWAL_KEY))?.value);
+    const next = renewalFor(await database.allowances.toArray(), rule, todayIso, new Date().toISOString());
+    if (!next || (await database.allowances.get(next.id!))) return null;
+    await database.allowances.put(next);
+    return next;
+  });
 }

@@ -3,20 +3,20 @@ import type { Lang, Translation } from '../lib/i18n';
 import { catLabel } from '../lib/i18n';
 import { CURRENCIES, auditText, budgetState, fundsIn, incomeIn, money, monthLabel, monthSplit, sumExpenses } from '../lib/finance';
 import type { LiveRates } from '../lib/liveRates';
-import type { AuditRecord, Conversion, Expense, ExpenseCategory, IncomeEntry, MonthlyBudget } from '../types/finance';
-import { BalanceCards, BudgetAlert, CurrencySelect, LiveRatesNotice, LiveStamp, MonthPicker, ProgressBar, StateBadge, fill } from '../components/Common';
+import type { AuditRecord, Conversion, Expense, ExpenseCategory, IncomeEntry, Allowance } from '../types/finance';
+import { BalanceCards, BudgetAlert, CurrencySelect, LiveRatesNotice, LiveStamp, MonthPicker, ProgressBar, StateBadge, fill, periodLabel } from '../components/Common';
 import { CategoryBars } from '../components/Charts';
 
 type Props = {
   t: Translation; lang: Lang; month: string; setMonth: (m: string) => void;
-  expenses: Expense[]; budgets: MonthlyBudget[]; categories: ExpenseCategory[]; incomes: IncomeEntry[]; conversions: Conversion[];
+  expenses: Expense[]; allowances: Allowance[]; categories: ExpenseCategory[]; incomes: IncomeEntry[]; conversions: Conversion[];
   live: LiveRates; closing: Record<string, number>; opening: Record<string, number>; activity: AuditRecord[];
   curOf: (key: string) => string; setCur: (key: string, c: string) => void; onRefreshLive: () => void;
 };
 
-export default function OverviewPage({ t, lang, month, setMonth, expenses, budgets, categories, incomes, conversions, live, closing, opening, activity, curOf, setCur, onRefreshLive }: Props) {
-  const sp = monthSplit(month, expenses, budgets);
-  const state = budgetState(sp.raw, sp.budget);
+export default function OverviewPage({ t, lang, month, setMonth, expenses, allowances, categories, incomes, conversions, live, closing, opening, activity, curOf, setCur, onRefreshLive }: Props) {
+  const sp = monthSplit(month, expenses, allowances);
+  const state = budgetState(sp.used, sp.budget);
   const fundsCur = curOf('overview.funds'), incomeCur = curOf('overview.income');
   const fundsTotal = fundsIn(closing, fundsCur, live);
   const negative = Object.entries(closing).filter(([, v]) => v < 0).map(([c]) => c);
@@ -41,7 +41,7 @@ export default function OverviewPage({ t, lang, month, setMonth, expenses, budge
       <div className="subtitle-row"><p className="subtitle">{t.overviewSubtitle}</p><MonthPicker t={t} month={month} onChange={setMonth} /></div>
       <LiveRatesNotice t={t} live={live} onRetry={onRefreshLive} />
       {negative.length > 0 && <div className="banner over" role="alert">⚠ {fill(t.negativeFunds, { list: negative.join(', ') })}</div>}
-      <BudgetAlert t={t} lang={lang} spent={sp.raw} budget={sp.budget} />
+      <BudgetAlert t={t} lang={lang} spent={sp.used} budget={sp.budget} />
       <section className="stats">
         <div className="stat-card"><div className="stat-top"><span>{t.totalFunds}</span><CurrencySelect t={t} value={fundsCur} onChange={(c) => setCur('overview.funds', c)} /></div>
           <strong className={fundsTotal.total < 0 ? 'neg' : ''}>{money(fundsTotal.total, lang, fundsCur)}</strong>
@@ -51,8 +51,8 @@ export default function OverviewPage({ t, lang, month, setMonth, expenses, budge
         <div className="stat-card"><div className="stat-top"><span>{t.monthTotal}</span><span className="stat-icon orange"><ReceiptText size={17} /></span></div><strong>{money(sp.total, lang)}</strong>
           <small>{t.inBudgetSpent}: {money(sp.inside, lang)} · {t.outBudgetSpent}: {money(sp.outside, lang)}</small></div>
         <div className="stat-card"><div className="stat-top"><span>{t.budgetRemaining}</span><span className="stat-icon purple"><Wallet size={17} /></span></div>
-          <strong>{sp.budget ? money(Math.max(0, sp.budget - sp.inside), lang) : '—'}</strong><small>{sp.budget ? `${t.budgetTotal}: ${money(sp.budget, lang)}` : t.monthlyBudgetNotSet}</small>
-          {sp.budget > 0 && <><ProgressBar spent={sp.raw} budget={sp.budget} /><StateBadge t={t} state={state} /></>}</div>
+          <strong>{sp.budget ? money(Math.max(0, sp.budget - sp.used), lang) : '—'}</strong><small>{sp.budget ? `${t.budgetTotal}: ${money(sp.budget, lang)}${sp.allowance ? ' · ' + periodLabel(sp.allowance, t, lang) : ''}` : t.monthlyBudgetNotSet}</small>
+          {sp.budget > 0 && <><ProgressBar spent={sp.used} budget={sp.budget} /><StateBadge t={t} state={state} /></>}</div>
       </section>
 
       <section className="panel">

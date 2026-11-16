@@ -1,4 +1,5 @@
 import { DEFAULT_CATEGORIES, OVERRUN_CATEGORY_ID, budgetId, db, newId, occurrenceId, overrunId, type FinanceDB } from './db';
+import { MIGRATED_KEY, allowancesFromBudgets } from './allowances';
 
 export const BACKUP_FORMAT = 7;
 export const TABLES = ['expenses', 'categories', 'auditLog', 'budgets', 'allowances', 'income', 'conversions', 'settings'] as const;
@@ -47,6 +48,8 @@ export function parseBackup(data: unknown): Parsed | null {
     tables.auditLog = kept;
   }
   if (legacy) remapLegacyIds(tables);
+  // Backups made before allowances have no allowances: each old monthly budget becomes one (1st to last day of its month).
+  if (!Array.isArray(data.allowances)) tables.allowances = allowancesFromBudgets(tables.budgets as { month: string; amount: number }[], new Date().toISOString());
   return { tables, legacy, droppedRates: legacy && Array.isArray(data.exchanges) ? data.exchanges.length : 0, droppedAudit };
 }
 
@@ -108,6 +111,7 @@ export async function applyBackup(p: Parsed, database: FinanceDB = db) {
       await table.clear();
       await table.bulkPut(p.tables[k]);
     }
+    await database.settings.put({ key: MIGRATED_KEY, value: true });   // the restored data is already in the allowance form
   });
 }
 

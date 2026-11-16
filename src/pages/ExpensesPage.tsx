@@ -2,23 +2,22 @@ import { useMemo, useState } from 'react';
 import { ArrowDownLeft, History, Pencil, Plus, ReceiptText, Search, Trash2, TrendingUp, Wallet } from 'lucide-react';
 import type { Lang, Translation } from '../lib/i18n';
 import { catLabel } from '../lib/i18n';
-import { auditText, budgetFor, money, monthLabel, monthSplit } from '../lib/finance';
-import type { AuditRecord, Expense, ExpenseCategory, MonthlyBudget } from '../types/finance';
-import { BudgetAlert, MonthPicker, ProgressBar, StateBadge, fill } from '../components/Common';
+import { auditText, money, monthLabel, monthSplit } from '../lib/finance';
+import type { Allowance, AuditRecord, Expense, ExpenseCategory } from '../types/finance';
+import { BudgetAlert, MonthPicker, ProgressBar, StateBadge, fill, periodLabel } from '../components/Common';
 import { budgetState } from '../lib/finance';
 
 type Props = {
   t: Translation; lang: Lang; month: string; setMonth: (m: string) => void;
-  expenses: Expense[]; budgets: MonthlyBudget[]; categories: ExpenseCategory[]; activity: AuditRecord[];
+  expenses: Expense[]; allowances: Allowance[]; categories: ExpenseCategory[]; activity: AuditRecord[];
   onAdd: () => void; onEdit: (e: Expense) => void; onDelete: (e: Expense) => void; onAddCategory: () => void;
 };
 
-export default function ExpensesPage({ t, lang, month, setMonth, expenses, budgets, categories, activity, onAdd, onEdit, onDelete, onAddCategory }: Props) {
+export default function ExpensesPage({ t, lang, month, setMonth, expenses, allowances, categories, activity, onAdd, onEdit, onDelete, onAddCategory }: Props) {
   const [query, setQuery] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('all');
-  const sp = monthSplit(month, expenses, budgets);
-  const budget = budgetFor(month, budgets);
-  const state = budgetState(sp.raw, sp.budget);
+  const sp = monthSplit(month, expenses, allowances);
+  const state = budgetState(sp.used, sp.budget);
   const monthCount = expenses.filter((e) => e.date.startsWith(month)).length;
   const q = query.toLowerCase();
   const filtered = useMemo(
@@ -28,15 +27,15 @@ export default function ExpensesPage({ t, lang, month, setMonth, expenses, budge
   return (
     <>
       <div className="subtitle-row"><p className="subtitle">{t.dashboardHint}</p><MonthPicker t={t} month={month} onChange={setMonth} /></div>
-      <BudgetAlert t={t} lang={lang} spent={sp.raw} budget={sp.budget} />
+      <BudgetAlert t={t} lang={lang} spent={sp.used} budget={sp.budget} />
       <section className="stats">
         <div className="stat-card"><div className="stat-top"><span>{t.inBudgetSpent}</span><span className="stat-icon blue"><Wallet size={17} /></span></div><strong>{money(sp.inside, lang)}</strong><small>{sp.overrun > 0 ? t.inBudgetCapNote : monthLabel(month, lang)}</small></div>
         <div className="stat-card"><div className="stat-top"><span>{t.outBudgetSpent}</span><span className="stat-icon orange"><ArrowDownLeft size={17} /></span></div><strong>{money(sp.outside, lang)}</strong><small>{sp.overrun > 0 ? fill(t.overrunNote, { amount: money(sp.overrun, lang) }) : monthLabel(month, lang)}</small></div>
         <div className="stat-card"><div className="stat-top"><span>{t.monthTotal}</span><span className="stat-icon purple"><ReceiptText size={17} /></span></div><strong>{money(sp.total, lang)}</strong><small>{monthCount} {t.count.toLowerCase()} · {monthLabel(month, lang)}</small></div>
         <div className="stat-card"><div className="stat-top"><span>{t.budgetRemaining}</span><span className="stat-icon green"><TrendingUp size={17} /></span></div>
-          <strong>{sp.budget ? money(Math.max(0, sp.budget - sp.inside), lang) : '—'}</strong>
-          <small>{sp.budget ? `${t.budgetTotal}: ${money(sp.budget, lang)}${budget.inherited ? ' · ' + t.carriedForward : ''}` : t.monthlyBudgetNotSet}</small>
-          {sp.budget > 0 && <><ProgressBar spent={sp.raw} budget={sp.budget} /><StateBadge t={t} state={state} /></>}</div>
+          <strong>{sp.budget ? money(Math.max(0, sp.budget - sp.used), lang) : '—'}</strong>
+          <small>{sp.budget ? `${t.budgetTotal}: ${money(sp.budget, lang)}${sp.allowance ? ' · ' + periodLabel(sp.allowance, t, lang) : ''}` : t.monthlyBudgetNotSet}</small>
+          {sp.budget > 0 && <><ProgressBar spent={sp.used} budget={sp.budget} /><StateBadge t={t} state={state} /></>}</div>
       </section>
       <section className="panel">
         <div className="panel-head"><div><h2>{t.expenses}</h2><p>{t.reviewManageTransactions}</p></div><button className="outline" onClick={onAddCategory}>+ {t.customCategory}</button></div>

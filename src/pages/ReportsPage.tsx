@@ -3,16 +3,16 @@ import type { Lang, Translation } from '../lib/i18n';
 import { catLabel } from '../lib/i18n';
 import { downloadCsv, incomeIn, locale, money, monthSplit, thisMonth } from '../lib/finance';
 import { liveRate, type LiveRates } from '../lib/liveRates';
-import type { Expense, ExpenseCategory, IncomeEntry, MonthlyBudget } from '../types/finance';
+import type { Expense, ExpenseCategory, IncomeEntry, Allowance } from '../types/finance';
 import { CurrencySelect, LiveRatesNotice, LiveStamp, fill, reportCurrency } from '../components/Common';
 import { CategoryBars, MonthlyBars } from '../components/Charts';
 
 type Props = {
-  t: Translation; lang: Lang; budgets: MonthlyBudget[]; expenses: Expense[]; categories: ExpenseCategory[]; incomes: IncomeEntry[]; live: LiveRates;
+  t: Translation; lang: Lang; allowances: Allowance[]; expenses: Expense[]; categories: ExpenseCategory[]; incomes: IncomeEntry[]; live: LiveRates;
   curOf: (key: string) => string; setCur: (key: string, c: string) => void; onRefreshLive: () => void;
 };
 
-export default function ReportsPage({ t, lang, budgets, expenses, categories, incomes, live, curOf, setCur, onRefreshLive }: Props) {
+export default function ReportsPage({ t, lang, allowances, expenses, categories, incomes, live, curOf, setCur, onRefreshLive }: Props) {
   const nowYear = Number(thisMonth().slice(0, 4));
   const [year, setYear] = useState(nowYear);
   // One currency for the whole report so that income, expenses and net always add up.
@@ -28,7 +28,7 @@ export default function ReportsPage({ t, lang, budgets, expenses, categories, in
   const gRate = liveRate('GHS', cur, live) ?? 1;
   const months = Array.from({ length: 12 }, (_, i) => {
     const key = `${y}-${String(i + 1).padStart(2, '0')}`;
-    const sp = monthSplit(key, expenses, budgets), r = gRate;
+    const sp = monthSplit(key, expenses, allowances), r = gRate;
     const inside = sp.inside * r, outside = sp.outside * r;
     const income = incomes.filter((x) => x.date.startsWith(key)).reduce((s, x) => s + (incomeIn(x, cur, live) ?? 0), 0);
     return { key, label: new Date(year, i, 1).toLocaleString(locale(lang), { month: 'short' }), full: new Date(year, i, 1).toLocaleString(locale(lang), { month: 'long' }), inside, outside, income, net: income - inside - outside };

@@ -1,6 +1,6 @@
 import 'fake-indexeddb/auto';
 import assert from 'node:assert/strict';
-import { FinanceDB, seedCategories } from '../src/lib/db';
+import { FinanceDB, allowanceId, seedCategories } from '../src/lib/db';
 import { SyncEngine, type PushRow, type Remote, type RemoteRow } from '../src/lib/sync/engine';
 import { generateRecurring, syncOverruns } from '../src/lib/finance';
 
@@ -97,18 +97,20 @@ const amount = async (d: ReturnType<typeof device>, id: number) => (await d.db.e
 {
   const cloud = new FakeRemote(), A = device(), B = device();
   await A.db.expenses.put(exp(300, { title: 'Rent', amount: 400, date: '2026-08-31', recurring: true, recurringFrequency: 'monthly' }));
-  await A.db.budgets.put({ id: 77, month: '2026-11', amount: 100, currency: 'GHS' });
+  await A.db.allowances.put({ id: allowanceId('2026-11-01'), startDate: '2026-11-01', endDate: '', amount: 100, note: '', createdAt: 'x', updatedAt: 'x' });
   await A.eng.syncOnce(cloud); await B.eng.syncOnce(cloud);
   for (const d of [A, B]) { await seedCategories(d.db); await generateRecurring('2026-11-14', d.db); }          // both open the app the same day
   await B.db.expenses.put(exp(301, { amount: 150, date: '2026-11-02' })); await B.db.expenses.put(exp(302, { amount: 90, date: '2026-11-09' }));
-  for (const d of [A, B]) await syncOverruns(d.db);                                                              // 240 on a 100 budget
+  for (const d of [A, B]) await syncOverruns(d.db);                                                              // 240 on a 100 allowance
   for (let i = 0; i < 2; i++) for (const d of [A, B]) { await d.eng.syncOnce(cloud); await generateRecurring('2026-11-14', d.db); await syncOverruns(d.db); }
   for (const d of [A, B]) await d.eng.syncOnce(cloud);
   const occurrences = (await A.db.expenses.toArray()).filter((e) => e.recurringParentId === 300);
   assert.equal(occurrences.length, 2); assert.equal(await B.db.expenses.where('recurringParentId').equals(300).count(), 2);   // Sep 30 and Oct 31, once each
-  assert.equal((await A.db.expenses.toArray()).filter((e) => e.autoOverrun === '2026-11').length, 1);
+  assert.equal((await A.db.expenses.toArray()).filter((e) => e.autoOverrun === '2026-11-01|2026-11').length, 1);
   assert.equal(await A.db.categories.count(), 7);                                                                // 6 built-in + "Budget overrun", each once
   assert.equal(cloud.live('categories').length, 7);
+  assert.equal(await B.db.allowances.count(), 1);                                                                // the allowance reached the other device through sync
+  assert.equal(cloud.live('allowances').length, 1);
   assert.deepEqual((await A.db.expenses.toArray()).map((e) => e.id).sort(), (await B.db.expenses.toArray()).map((e) => e.id).sort());
   assert.equal(await A.eng.pendingCount(), 0); assert.equal(await B.eng.pendingCount(), 0);
 }
