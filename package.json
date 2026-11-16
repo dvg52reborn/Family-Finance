@@ -1,0 +1,31 @@
+{
+  "name": "family-finance-manager",
+  "private": true,
+  "version": "0.8.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "test": "tsx tests/logic.test.ts && tsx tests/fresh.test.ts && tsx tests/backup.test.ts && tsx tests/cloud.test.ts && tsx tests/sync.test.ts && tsx tests/sql.test.ts && tsx --tsconfig tests/tsconfig.json tests/render.test.tsx"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.119.0",
+    "@vitejs/plugin-react": "^4.3.4",
+    "dexie": "^4.0.8",
+    "dexie-react-hooks": "^1.1.7",
+    "lucide-react": "^0.468.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "vite": "^6.0.5"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.5.16",
+    "@types/react": "^18.3.18",
+    "@types/react-dom": "^18.3.5",
+    "fake-indexeddb": "^6.2.8",
+    "tsx": "^4.23.15",
+    "typescript": "~5.7.2",
+    "vite-plugin-pwa": "^2.0.0"
+  }
+}
