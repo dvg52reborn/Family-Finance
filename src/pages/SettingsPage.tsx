@@ -8,18 +8,22 @@ import type { AuditRecord, Expense, ExpenseCategory } from '../types/finance';
 import { fill } from '../components/Common';
 import CloudPanel from '../components/CloudPanel';
 import type { useCloud } from '../lib/sync/useCloud';
+import type { RenewalRule } from '../lib/allowances';
 
 type Props = {
   t: Translation; lang: Lang; setLang: (l: Lang) => void; categories: ExpenseCategory[]; expenses: Expense[]; history: AuditRecord[];
   cloud: ReturnType<typeof useCloud>; openings: Record<string, number>; onSaveOpenings: (o: Record<string, number>) => Promise<void>;
+  renewal: RenewalRule; onSaveRenewal: (r: RenewalRule) => Promise<void>;
   version: string; onAddCategory: () => void; onDeleteCategory: (c: ExpenseCategory) => void; onBackup: () => void; onRestore: (file: File) => void;
 };
 
-export default function SettingsPage({ t, lang, setLang, categories, expenses, history, cloud, openings, onSaveOpenings, version, onAddCategory, onDeleteCategory, onBackup, onRestore }: Props) {
+export default function SettingsPage({ t, lang, setLang, categories, expenses, history, cloud, openings, onSaveOpenings, renewal, onSaveRenewal, version, onAddCategory, onDeleteCategory, onBackup, onRestore }: Props) {
   const gate = restoreGate(cloud.state.status, cloud.state.family?.role);
   const fileRef = useRef<HTMLInputElement>(null);
   const [draft, setDraft] = useState<Record<string, string>>(() => Object.fromEntries(CURRENCIES.map((c) => [c, openings[c] ? String(openings[c]) : ''])));
   const [saved, setSaved] = useState(false);
+  const [rn, setRn] = useState({ enabled: renewal.enabled, useDefault: renewal.useDefault, defaultAmount: renewal.defaultAmount ? String(renewal.defaultAmount) : '' });
+  const [rnSaved, setRnSaved] = useState(false);
   return (
     <>
       <p className="subtitle">{t.settingsSubtitle}</p>
@@ -40,6 +44,19 @@ export default function SettingsPage({ t, lang, setLang, categories, expenses, h
         }}>
           {CURRENCIES.map((c) => <label key={c}>{currencyName(c, lang)}<input type="number" step="0.01" value={draft[c]} onChange={(e) => { setSaved(false); setDraft({ ...draft, [c]: e.target.value }); }} placeholder="0" /></label>)}
           <div className="opening-actions"><button className="primary" type="submit">{t.saveOpening}</button>{saved && <span className="hint">{t.openingSaved}</span>}</div>
+        </form>
+      </section>
+      <section className="panel">
+        <div className="panel-head"><div><h2>{t.renewalTitle}</h2><p>{t.renewalHint}</p></div></div>
+        <form className="opening-grid" onSubmit={async (e) => {
+          e.preventDefault();
+          await onSaveRenewal({ enabled: rn.enabled, useDefault: rn.useDefault, defaultAmount: Number(rn.defaultAmount) || 0 });
+          setRnSaved(true);
+        }}>
+          <label className="check full"><input type="checkbox" checked={rn.enabled} onChange={(e) => { setRnSaved(false); setRn({ ...rn, enabled: e.target.checked }); }} />{t.renewalOn}</label>
+          <label className="check full"><input type="checkbox" checked={rn.useDefault} disabled={!rn.enabled} onChange={(e) => { setRnSaved(false); setRn({ ...rn, useDefault: e.target.checked }); }} />{t.renewalUseDefault}</label>
+          <label>{t.renewalDefaultAmount}<input type="number" min="0" step="0.01" value={rn.defaultAmount} disabled={!rn.enabled || !rn.useDefault} onChange={(e) => { setRnSaved(false); setRn({ ...rn, defaultAmount: e.target.value }); }} placeholder="0" /></label>
+          <div className="opening-actions"><button className="primary" type="submit">{t.saveRenewal}</button>{rnSaved && <span className="hint">{t.saved}</span>}</div>
         </form>
       </section>
       <section className="panel">

@@ -1,8 +1,14 @@
 import type { Translation, Lang } from '../lib/i18n';
-import { CURRENCIES, budgetState, currencyName, money, type BudgetState } from '../lib/finance';
+import { CURRENCIES, budgetState, currencyName, fmtDate, money, type BudgetState } from '../lib/finance';
+import type { Allowance } from '../types/finance';
 import { liveRate, type LiveRates } from '../lib/liveRates';
 
 export const fill = (s: string, vars: Record<string, string | number>) => Object.entries(vars).reduce((a, [k, v]) => a.replace(`{${k}}`, String(v)), s);
+
+/** "From 1 Nov 2026" or "1 Nov 2026 – 30 Nov 2026" (the end date is shown only if it is set). */
+export function periodLabel(a: Allowance, t: Translation, lang: Lang) {
+  return a.endDate ? fill(t.alwFromTo, { start: fmtDate(a.startDate, lang), end: fmtDate(a.endDate, lang) }) : fill(t.alwFromDate, { start: fmtDate(a.startDate, lang) });
+}
 
 export function MonthPicker({ t, month, onChange }: { t: Translation; month: string; onChange: (m: string) => void }) {
   return <label className="month-picker">{t.month}<input type="month" value={month} onChange={(e) => e.target.value && onChange(e.target.value)} /></label>;

@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
-    "test": "tsx tests/logic.test.ts && tsx tests/fresh.test.ts && tsx tests/backup.test.ts && tsx tests/cloud.test.ts && tsx tests/sync.test.ts && tsx tests/sql.test.ts && tsx --tsconfig tests/tsconfig.json tests/render.test.tsx"
+    "test": "tsx tests/logic.test.ts && tsx tests/fresh.test.ts && tsx tests/backup.test.ts && tsx tests/cloud.test.ts && tsx tests/sync.test.ts && tsx tests/sql.test.ts && tsx tests/allowances.test.ts && tsx --tsconfig tests/tsconfig.json tests/render.test.tsx"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.119.0",

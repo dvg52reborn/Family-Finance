@@ -27,7 +27,7 @@ export type Expense = {
 export type AuditChange = { field: string; from: string; to: string };
 export type AuditRecord = {
   id?: number;
-  entity: 'expense' | 'income' | 'category' | 'conversion';
+  entity: 'expense' | 'income' | 'category' | 'conversion' | 'allowance';
   entityId: number;
   action: 'created' | 'updated' | 'deleted' | 'generated';
   /** Legacy English summary (older records only). */
@@ -39,6 +39,9 @@ export type AuditRecord = {
 };
 
 export type MonthlyBudget = { id?: number; month: string; amount: number; currency: 'GHS' };
+/** Spending money taken from the GHS balance for a period. endDate '' = still open. amount is the current amount; spent is worked out from expenses. */
+/** adjustments records each later change of the amount with its date, so past months keep the figures they had at the time. */
+export type Allowance = { id?: number; startDate: string; endDate: string; amount: number; note: string; createdAt: string; updatedAt: string; adjustments?: { date: string; delta: number }[] };
 export type IncomeEntry = { id?: number; title: string; amount: number; currency: string; date: string; notes: string };
 
 /** A currency exchange the family actually did: fromAmount fromCurrency became toAmount toCurrency. */

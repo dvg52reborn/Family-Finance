@@ -1,5 +1,5 @@
 import Dexie, { type Table } from 'dexie';
-import type { Expense, ExpenseCategory, AuditRecord, MonthlyBudget, IncomeEntry, Conversion, Setting } from '../types/finance';
+import type { Expense, ExpenseCategory, AuditRecord, MonthlyBudget, IncomeEntry, Conversion, Setting, Allowance } from '../types/finance';
 
 /** Database for 0.8.0. Ids are no longer counted 1, 2, 3...: several devices create records at the same time, so every id must be unique across devices. */
 export const DB_NAME = 'family-finance-manager-v7';
@@ -13,6 +13,7 @@ export class FinanceDB extends Dexie {
   categories!: Table<ExpenseCategory, number>;
   auditLog!: Table<AuditRecord, number>;
   budgets!: Table<MonthlyBudget, number>;
+  allowances!: Table<Allowance, number>;
   income!: Table<IncomeEntry, number>;
   conversions!: Table<Conversion, number>;
   settings!: Table<Setting, string>;
@@ -31,6 +32,8 @@ export class FinanceDB extends Dexie {
       syncState: 'key',
       syncMeta: 'key',
     });
+    // Version 2 adds allowances. Existing budgets are kept; they are converted to allowances by the app (see the allowances feature).
+    this.version(2).stores({ allowances: 'id,startDate,endDate' });
   }
 }
 export const db = new FinanceDB();
@@ -55,6 +58,8 @@ export function hashId(s: string): number {
 export const occurrenceId = (parentId: number, date: string) => hashId(`occurrence|${parentId}|${date}`);
 export const overrunId = (month: string) => hashId(`overrun|${month}`);
 export const budgetId = (month: string) => hashId(`budget|${month}`);
+/** One allowance per start date: two devices that create the same allowance (or the same automatic renewal) get one record. */
+export const allowanceId = (startDate: string) => hashId(`allowance|${startDate}`);
 
 /** Built-in categories keep the same ids on every device, so a second device never creates a second "Food & groceries". */
 export const DEFAULT_CATEGORIES = [

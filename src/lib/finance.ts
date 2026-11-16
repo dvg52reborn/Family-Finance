@@ -1,5 +1,6 @@
 import { OVERRUN_CATEGORY_ID, db, logAudit, occurrenceId, overrunId, type FinanceDB } from './db';
-import type { AuditRecord, Conversion, Expense, Frequency, IncomeEntry, MonthlyBudget } from '../types/finance';
+import type { Allowance, AuditRecord, Conversion, Expense, Frequency, IncomeEntry } from '../types/finance';
+import { allowanceFor, allowanceForMonth, amountAsOf, costAsOf, monthEnd, overrunDate, overrunIn, spentThrough } from './allowances';
 import { convertLive, type LiveRates } from './liveRates';
 import type { Lang, Translation } from './i18n';
 import { actLabel, catLabel } from './i18n';
@@ -22,6 +23,8 @@ export function addPeriods(iso: string, freq: Frequency, k: number): string {
 
 /* ---------- formatting ---------- */
 export const locale = (lang: Lang) => (lang === 'fr' ? 'fr-FR' : 'en-GH');
+/** A YYYY-MM-DD date written for people, e.g. 1 Nov 2026. */
+export const fmtDate = (iso: string, lang: Lang) => { const [y, m, d] = iso.split('-').map(Number); return new Date(y, m - 1, d).toLocaleDateString(locale(lang), { day: 'numeric', month: 'short', year: 'numeric' }); };
 export const CURRENCIES = ['GHS', 'XOF', 'USD', 'EUR', 'GBP', 'NGN', 'CAD'] as const;
 export const money = (n: number, lang: Lang = 'en', currency = 'GHS') =>
   new Intl.NumberFormat(locale(lang), { style: 'currency', currency, maximumFractionDigits: currency === 'XOF' ? 0 : 2 }).format(n);
@@ -69,13 +72,6 @@ export async function generateRecurring(upTo = today(), database: FinanceDB = db
 
 /* ---------- budgets ---------- */
 export type BudgetState = 'none' | 'ok' | 'warn' | 'over';
-/** Budget for a month; if none was set, the most recent earlier month's budget carries forward. */
-export function budgetFor(month: string, budgets: MonthlyBudget[]): { amount: number; inherited: boolean } {
-  const exact = budgets.find((b) => b.month === month);
-  if (exact) return { amount: exact.amount, inherited: false };
-  const earlier = budgets.filter((b) => b.month < month).sort((a, b) => b.month.localeCompare(a.month))[0];
-  return earlier ? { amount: earlier.amount, inherited: true } : { amount: 0, inherited: false };
-}
 export function budgetState(spent: number, budget: number): BudgetState {
   if (!budget) return 'none';
   const r = spent / budget;
@@ -92,12 +88,12 @@ export const incomeIn = (i: IncomeEntry, cur: string, live: LiveRates) => conver
 const fieldKey: Record<string, keyof Translation> = {
   title: 'title', amount: 'amount', category: 'category', date: 'date', notes: 'notes',
   recurring: 'recurring', frequency: 'frequency', outsideBudget: 'outsideBudget', currency: 'currency',
-  rate: 'rate', source: 'source', fromAmount: 'exchangeFrom', toAmount: 'receivedAmount', fromCurrency: 'fromCurrency', toCurrency: 'toCurrency',
+  startDate: 'allowanceStart', endDate: 'allowanceEnd', rate: 'rate', source: 'source', fromAmount: 'exchangeFrom', toAmount: 'receivedAmount', fromCurrency: 'fromCurrency', toCurrency: 'toCurrency',
 };
 export function auditText(a: AuditRecord, t: Translation, lang: Lang): string {
   if (!a.title) return actLabel(a.summary, lang);
   const verb = { created: t.auditCreated, updated: t.auditUpdated, deleted: t.auditDeleted, generated: t.auditGenerated }[a.action];
-  const what = { expense: t.auditExpense, income: t.auditIncome, category: t.auditCategory, conversion: t.auditConversion }[a.entity];
+  const what = { expense: t.auditExpense, income: t.auditIncome, category: t.auditCategory, conversion: t.auditConversion, allowance: t.auditAllowance }[a.entity];
   const base = `${verb} · ${what} “${a.title}”`;
   if (!a.changes?.length) return base;
   const show = (field: string, v: string) =>
@@ -134,38 +130,42 @@ export function monthsBetween(from: string, to: string): string[] {
 }
 
 /* ---------- monthly split: in-budget vs out-of-budget (overrun moved out automatically) ---------- */
-export function monthSplit(month: string, expenses: Expense[], budgets: MonthlyBudget[]) {
-  const budget = budgetFor(month, budgets).amount;
+/**
+ * What one calendar month looks like against the allowance(s). Expenses stay in the month they were made in; the allowance
+ * shown is the newest one that overlaps the month, and `used` is what it has spent up to the end of that month.
+ */
+export function monthSplit(month: string, expenses: Expense[], allowances: Allowance[]) {
   const rows = expenses.filter((e) => e.date.startsWith(month) && !e.autoOverrun);
   const raw = sumExpenses(rows, (e) => !e.outsideBudget);          // everything entered as "within budget"
   const outsideRows = sumExpenses(rows, (e) => e.outsideBudget);   // entered as "outside budget"
-  const overrun = budget > 0 ? Math.max(0, raw - budget) : 0;      // excess over the monthly budget
-  const inside = budget > 0 ? Math.min(raw, budget) : raw;         // in-budget total, capped at the budget
-  return { budget, raw, inside, outsideRows, overrun, outside: outsideRows + overrun, total: raw + outsideRows };
+  const mEnd = monthEnd(month);
+  const allowance = allowanceForMonth(month, allowances) ?? null;
+  const overrun = cents(allowances.reduce((s, a) => s + overrunIn(a, month, expenses), 0));   // spending beyond the allowance(s) this month
+  const budget = allowance ? amountAsOf(allowance, allowance.endDate && allowance.endDate < mEnd ? allowance.endDate : mEnd) : 0;
+  const used = allowance ? spentThrough(allowance, mEnd, expenses) : raw;
+  const inside = raw - overrun;                                    // in-budget total, without the excess
+  return { budget, allowance, used, raw, inside, outsideRows, overrun, outside: outsideRows + overrun, total: raw + outsideRows };
 }
 
 /* ---------- family funds ---------- */
-export type FundsInput = { openings: Record<string, number>; incomes: IncomeEntry[]; conversions: Conversion[]; expenses: Expense[]; budgets: MonthlyBudget[] };
+export type FundsInput = { openings: Record<string, number>; incomes: IncomeEntry[]; conversions: Conversion[]; expenses: Expense[]; allowances: Allowance[] };
 /**
  * Money the family owns per currency at the END of `month`:
  *   opening balance + income - exchanged out + exchanged in - GHS spending.
- * GHS spending = out-of-budget expenses + budget overruns + the monthly budget.
- * The budget is set aside for the current (and any future) month; once a month is over, only what was really spent
- * is kept as spent and the unspent part returns to the funds.
+ * GHS spending = out-of-budget expenses + expenses made with no allowance running + what the allowances have taken out of funds.
+ * An open allowance holds its whole amount (or its spending, if that is more); a closed one holds only what was spent, so the
+ * unspent part is back in funds. Amount changes count from the day they were made, so past months keep their figures.
  */
-export function fundsAsOf(month: string, d: FundsInput, nowMonth = thisMonth()): Record<string, number> {
+export function fundsAsOf(month: string, d: FundsInput): Record<string, number> {
   const f: Record<string, number> = {};
   for (const c of CURRENCIES) f[c] = d.openings[c] ?? 0;
   const add = (c: string, v: number) => { f[c] = (f[c] ?? 0) + v; };
   d.incomes.filter((i) => i.date.slice(0, 7) <= month).forEach((i) => add(i.currency, i.amount));
   d.conversions.filter((c) => c.date.slice(0, 7) <= month).forEach((c) => { add(c.fromCurrency, -c.fromAmount); add(c.toCurrency, c.toAmount); });
   const real = d.expenses.filter((e) => !e.autoOverrun);
-  const earliest = real.reduce((m, e) => (e.date.slice(0, 7) < m ? e.date.slice(0, 7) : m), nowMonth);
-  for (const m of monthsBetween(earliest, month)) {
-    const sp = monthSplit(m, real, d.budgets);
-    const reserved = sp.budget > 0 ? (m < nowMonth ? Math.min(sp.raw, sp.budget) : sp.budget) : sp.raw;
-    add('GHS', -(reserved + sp.overrun + sp.outsideRows));
-  }
+  const direct = real.filter((e) => e.date.slice(0, 7) <= month && (e.outsideBudget || !allowanceFor(e.date, d.allowances))).reduce((s, e) => s + e.amount, 0);
+  const held = d.allowances.reduce((s, a) => s + costAsOf(a, monthEnd(month), real), 0);
+  add('GHS', -(direct + held));
   for (const c of Object.keys(f)) f[c] = Math.round(f[c] * 100) / 100;
   return f;
 }
@@ -180,35 +180,36 @@ export function fundsIn(funds: Record<string, number>, cur: string, live: LiveRa
   return { total, missing };
 }
 
-/* ---------- automatic budget-overrun entry (one per month, kept in sync) ---------- */
+/* ---------- automatic budget-overrun entry (one per allowance and month, kept in sync) ---------- */
 export const OVERRUN_CATEGORY = 'Budget overrun';
 const cents = (n: number) => Math.round(n * 100) / 100;
 export async function syncOverruns(database: FinanceDB = db): Promise<void> {
-  await database.transaction('rw', database.expenses, database.categories, database.budgets, async () => {
-    const [all, budgets, cats] = await Promise.all([database.expenses.toArray(), database.budgets.toArray(), database.categories.toArray()]);
+  await database.transaction('rw', database.expenses, database.categories, database.allowances, async () => {
+    const [all, allowances, cats] = await Promise.all([database.expenses.toArray(), database.allowances.toArray(), database.categories.toArray()]);
     const real = all.filter((e) => !e.autoOverrun), autos = all.filter((e) => e.autoOverrun);
-    const months = new Set<string>([...real.map((e) => e.date.slice(0, 7)), ...autos.map((e) => e.autoOverrun!)]);
     const catId = cats.find((c) => c.name === OVERRUN_CATEGORY)?.id ?? OVERRUN_CATEGORY_ID;
     const catExists = cats.some((c) => c.id === catId);
-    for (const m of months) {
-      const budget = budgetFor(m, budgets).amount;
-      let cum = 0, tip = '';
-      if (budget > 0) {
-        const rows = real.filter((e) => e.date.startsWith(m) && !e.outsideBudget).sort((a, b) => a.date.localeCompare(b.date) || (a.id ?? 0) - (b.id ?? 0));
-        for (const r of rows) { cum += r.amount; if (!tip && cum > budget) tip = r.date; }
+    const latest = real.reduce((m, e) => (e.date.slice(0, 7) > m ? e.date.slice(0, 7) : m), thisMonth());
+    // what should exist: one entry per allowance and month in which spending went beyond the amount
+    const wanted = new Map<string, { over: number; date: string }>();
+    for (const a of allowances) {
+      for (const m of monthsBetween(a.startDate.slice(0, 7), a.endDate ? a.endDate.slice(0, 7) : latest)) {
+        const over = overrunIn(a, m, real);
+        if (over > 0) wanted.set(`${a.startDate}|${m}`, { over, date: overrunDate(a, m, real) });
       }
-      const over = cents(Math.max(0, cum - budget));
-      const [keep, ...dupes] = autos.filter((e) => e.autoOverrun === m);
-      for (const d of dupes) await database.expenses.delete(d.id!);
-      if (over > 0 && budget > 0) {
-        const now = new Date().toISOString();
-        if (!keep) {
-          if (!catExists) await database.categories.put({ id: catId, name: OVERRUN_CATEGORY, color: '#d9453a', createdAt: now });
-          await database.expenses.put({ id: overrunId(m), title: OVERRUN_CATEGORY, amount: over, currency: 'GHS', categoryId: catId, date: tip, notes: '', recurring: false, recurringFrequency: '', outsideBudget: true, autoOverrun: m, createdAt: now, updatedAt: now });
-        } else if (keep.amount !== over || keep.date !== tip) {
-          await database.expenses.update(keep.id!, { amount: over, date: tip, updatedAt: now });
-        }
-      } else if (keep) await database.expenses.delete(keep.id!);
     }
+    const now = new Date().toISOString();
+    for (const [key, { over, date }] of wanted) {
+      const [keep, ...dupes] = autos.filter((e) => e.autoOverrun === key);
+      for (const d of dupes) await database.expenses.delete(d.id!);
+      if (!keep) {
+        if (!catExists) await database.categories.put({ id: catId, name: OVERRUN_CATEGORY, color: '#d9453a', createdAt: now });
+        await database.expenses.put({ id: overrunId(key), title: OVERRUN_CATEGORY, amount: over, currency: 'GHS', categoryId: catId, date, notes: '', recurring: false, recurringFrequency: '', outsideBudget: true, autoOverrun: key, createdAt: now, updatedAt: now });
+      } else if (keep.amount !== over || keep.date !== date) {
+        await database.expenses.update(keep.id!, { amount: over, date, updatedAt: now });
+      }
+    }
+    // entries that are no longer owed, and old per-month entries from before allowances
+    for (const e of autos) if (!wanted.has(e.autoOverrun!)) await database.expenses.delete(e.id!);
   });
 }

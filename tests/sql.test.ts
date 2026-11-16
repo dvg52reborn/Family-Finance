@@ -95,4 +95,21 @@ await call('ben', `select public.leave_family()`); assert.equal((await rec('ben'
 await call('ann', `select public.leave_family()`);                                                                // last one out deletes the family
 assert.equal((await pg.query(`select count(*)::int as n from public.records where family_id = '${fam.id}'`)).rows[0].n, 0);
 assert.equal((await pg.query(`select count(*)::int as n from public.families`)).rows[0].n, 1);
+
+// ---------- supabase/add-allowances.sql: upgrading a project that was set up before allowances ----------
+{
+  const checkDef = async () => (await pg.query<{ d: string }>(`select pg_get_constraintdef(oid) as d from pg_constraint where conname = 'records_tbl_check'`)).rows[0]?.d ?? '';
+  assert.ok((await checkDef()).includes('allowances'), 'a fresh setup.sql already accepts allowances');
+  // put the old rule back, as an existing project has it
+  await pg.exec(`alter table public.records drop constraint records_tbl_check; alter table public.records add constraint records_tbl_check check (tbl in ('expenses', 'categories', 'auditLog', 'budgets', 'income', 'conversions', 'settings'))`);
+  const tryInsert = async (tbl: string) => {
+    try { await pg.query(`insert into public.records (family_id, tbl, id, data, ver) values ('00000000-0000-0000-0000-000000000000', $1, '1', '{}', 1)`, [tbl]); return 'inserted'; }
+    catch (e) { return /check constraint/.test(String(e)) ? 'check' : /foreign key/.test(String(e)) ? 'fk' : String(e); }
+  };
+  assert.equal(await tryInsert('allowances'), 'check', 'the old rule refuses allowances');
+  const upgrade = readFileSync(new URL('../supabase/add-allowances.sql', import.meta.url), 'utf8');
+  await pg.exec(upgrade); await pg.exec(upgrade);                                                                // running it twice is harmless
+  assert.equal(await tryInsert('allowances'), 'fk', 'after the upgrade allowances pass the rule (only the missing family stops the row)');
+  assert.equal(await tryInsert('nonsense'), 'check', 'other names are still refused');
+}
 console.log('sql tests passed');

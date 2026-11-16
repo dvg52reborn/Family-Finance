@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { messages, type Lang } from '../src/lib/i18n';
-import { fundsAsOf, prevMonth } from '../src/lib/finance';
+import { fmtDate, fundsAsOf, prevMonth } from '../src/lib/finance';
 import { fill } from '../src/components/Common';
 import OverviewPage from '../src/pages/OverviewPage';
 import ExpensesPage from '../src/pages/ExpensesPage';
@@ -18,7 +18,7 @@ const cats = [{ id: 1, name: 'Food & groceries', color: '#f59e0b', createdAt: ''
 const mkE = (o: object) => ({ id: 1, title: 'Rice', amount: 120, currency: 'GHS' as const, categoryId: 1, date: '2026-11-03', notes: 'n', recurring: false, recurringFrequency: '' as const, outsideBudget: false, createdAt: '', updatedAt: '', ...o });
 const expenses = [mkE({}), mkE({ id: 2, recurring: true, recurringFrequency: 'monthly' }), mkE({ id: 3, recurringParentId: 2 }),
   mkE({ id: 4, outsideBudget: true }), mkE({ id: 5, title: 'Budget overrun', categoryId: 2, outsideBudget: true, autoOverrun: '2026-11', amount: 160 })];
-const budgets = [{ id: 1, month: '2026-11', amount: 200, currency: 'GHS' as const }];
+const allowances = [{ id: 1, startDate: '2026-11-01', endDate: '', amount: 200, note: 'Nov', createdAt: '', updatedAt: '' }, { id: 2, startDate: '2026-10-01', endDate: '2026-10-31', amount: 400, note: '', createdAt: '', updatedAt: '' }];
 const incomes = [{ id: 1, title: 'Salary', amount: 3000, currency: 'GHS', date: '2026-11-01', notes: '' }, { id: 2, title: 'Support', amount: 100000, currency: 'XOF', date: '2026-11-02', notes: '' },
   { id: 3, title: 'Gift', amount: 50, currency: 'USD', date: '2026-11-02', notes: '' }, { id: 4, title: 'Old', amount: 5, currency: 'XOF', date: '2020-01-01', notes: '' }];
 const conversions = [{ id: 1, date: '2026-11-04', fromCurrency: 'GHS', fromAmount: 100, toCurrency: 'XOF', rate: 55, toAmount: 5500, notes: 'bank' }];
@@ -28,8 +28,8 @@ const curOf = (k: string) => prefs[k] ?? 'GHS';
 const audit = [{ id: 1, entity: 'conversion' as const, entityId: 1, action: 'created' as const, summary: '', title: '100 GHS → 5500 XOF', at: new Date().toISOString() },
   { id: 2, entity: 'expense' as const, entityId: 1, action: 'updated' as const, summary: '', title: 'Rice', at: new Date().toISOString(), changes: [{ field: 'amount', from: '1', to: '2' }] },
   { id: 3, entity: 'expense' as const, entityId: 1, action: 'created' as const, summary: 'Added “Old”', at: new Date().toISOString() }];
-const fi = { openings: { GHS: 100 }, incomes, conversions, expenses, budgets };
-const closing = fundsAsOf('2026-11', fi, '2026-11'), opening = fundsAsOf(prevMonth('2026-11'), fi, '2026-11');
+const fi = { openings: { GHS: 100 }, incomes, conversions, expenses, allowances };
+const closing = fundsAsOf('2026-11', fi), opening = fundsAsOf(prevMonth('2026-11'), fi);
 const noop = () => {}; const noopA = async () => {};
 
 // cloud stubs: SettingsPage needs the object returned by useCloud(); one stub per status
@@ -50,12 +50,12 @@ const statuses: SyncStatus[] = ['loading', 'unconfigured', 'signedOut', 'noFamil
 for (const lang of ['en', 'fr'] as Lang[]) {
   const t = messages[lang];
   const out: Record<string, string> = {
-    overview: renderToStaticMarkup(<OverviewPage t={t} lang={lang} month="2026-11" setMonth={noop} expenses={expenses} budgets={budgets} categories={cats} incomes={incomes} conversions={conversions} live={live} closing={closing} opening={opening} activity={audit} curOf={curOf} setCur={noop} onRefreshLive={noop} />),
-    expenses: renderToStaticMarkup(<ExpensesPage t={t} lang={lang} month="2026-11" setMonth={noop} expenses={expenses} budgets={budgets} categories={cats} activity={audit} onAdd={noop} onEdit={noop} onDelete={noop} onAddCategory={noop} />),
-    budget: renderToStaticMarkup(<BudgetPage t={t} lang={lang} month="2026-11" setMonth={noop} expenses={expenses} categories={cats} budget={{ amount: 200, inherited: false, saved: true }} onSave={noopA} onRemove={noopA} />),
+    overview: renderToStaticMarkup(<OverviewPage t={t} lang={lang} month="2026-11" setMonth={noop} expenses={expenses} allowances={allowances} categories={cats} incomes={incomes} conversions={conversions} live={live} closing={closing} opening={opening} activity={audit} curOf={curOf} setCur={noop} onRefreshLive={noop} />),
+    expenses: renderToStaticMarkup(<ExpensesPage t={t} lang={lang} month="2026-11" setMonth={noop} expenses={expenses} allowances={allowances} categories={cats} activity={audit} onAdd={noop} onEdit={noop} onDelete={noop} onAddCategory={noop} />),
+    budget: renderToStaticMarkup(<BudgetPage t={t} lang={lang} month="2026-11" setMonth={noop} expenses={expenses} categories={cats} allowances={allowances} today="2026-11-14" onCreate={async () => 'ok' as const} onChangeAmount={async () => 'ok' as const} onSetEnd={async () => 'ok' as const} onDelete={noopA} />),
     income: renderToStaticMarkup(<IncomePage t={t} lang={lang} incomes={incomes} conversions={conversions} live={live} funds={closing} curOf={curOf} setCur={noop} onRefreshLive={noop} onAddIncome={noop} onEditIncome={noop} onDeleteIncome={noop} onAddExchange={noop} onEditExchange={noop} onDeleteExchange={noop} />),
-    reports: renderToStaticMarkup(<ReportsPage t={t} lang={lang} budgets={budgets} expenses={expenses} categories={cats} incomes={incomes} live={live} curOf={curOf} setCur={noop} onRefreshLive={noop} />),
-    settings: renderToStaticMarkup(<SettingsPage t={t} lang={lang} setLang={noop} categories={cats} expenses={expenses} history={audit} cloud={mkCloud('idle')} openings={{ GHS: 100 }} onSaveOpenings={noopA} version="0.7.0" onAddCategory={noop} onDeleteCategory={noop} onBackup={noop} onRestore={noop} />),
+    reports: renderToStaticMarkup(<ReportsPage t={t} lang={lang} allowances={allowances} expenses={expenses} categories={cats} incomes={incomes} live={live} curOf={curOf} setCur={noop} onRefreshLive={noop} />),
+    settings: renderToStaticMarkup(<SettingsPage t={t} lang={lang} setLang={noop} categories={cats} expenses={expenses} history={audit} cloud={mkCloud('idle')} openings={{ GHS: 100 }} onSaveOpenings={noopA} renewal={{ enabled: true, useDefault: false, defaultAmount: 0 }} onSaveRenewal={noopA} version="0.7.0" onAddCategory={noop} onDeleteCategory={noop} onBackup={noop} onRestore={noop} />),
     modals: [<ExpenseModal key="a" t={t} lang={lang} categories={cats} expense={expenses[1]} onClose={noop} onSave={noopA} />, <ExpenseModal key="b" t={t} lang={lang} categories={cats} expense={expenses[2]} onClose={noop} onSave={noopA} />,
       <IncomeModal key="c" t={t} lang={lang} income={incomes[0]} onClose={noop} onSave={noopA} />, <ConversionModal key="d" t={t} lang={lang} conversion={conversions[0]} onClose={noop} onSave={noopA} />,
       <ConversionModal key="e" t={t} lang={lang} conversion={null} onClose={noop} onSave={noopA} />, <CategoryModal key="f" t={t} onClose={noop} onSave={noopA} />].map((m) => renderToStaticMarkup(m)).join(''),
@@ -70,6 +70,13 @@ for (const lang of ['en', 'fr'] as Lang[]) {
   assert.ok(out.overview.includes(t.fundsByCurrency) && out.overview.includes(t.monthMovement) && out.overview.includes('USD'), 'overview sections');
   assert.ok(out.income.includes(t.currencyExchanges) && out.income.includes('bank'), 'exchange table');
   assert.ok(out.settings.includes(t.openingBalances), 'opening balances');
+  assert.ok(out.settings.includes(t.renewalTitle) && out.settings.includes(t.renewalOn) && out.settings.includes(t.saveRenewal), 'renewal settings');
+  assert.ok(out.budget.includes(t.newAllowance) && out.budget.includes(t.alwTable), 'budget page: new allowance button and record table');
+  for (const h of [t.alwStarted, t.alwCompleted, t.alwAmount, t.alwSpent, t.alwLeft, t.alwStatus, t.alwNote]) assert.ok(out.budget.includes(`<th>${h}</th>`), `budget table column ${h}`);
+  assert.ok(out.budget.includes(t.alwActive) && out.budget.includes(t.alwClosed) && out.budget.includes(t.alwOpenEnd), 'status and open end shown');
+  assert.ok(out.budget.includes(t.alwChangeAmount), 'the active allowance can have its amount changed');
+  assert.ok(out.overview.includes(fill(t.alwFromDate, { start: fmtDate('2026-11-01', lang) })), 'overview shows the allowance start date (no end date set)');
+  assert.ok(out.expenses.includes(fill(t.alwFromDate, { start: fmtDate('2026-11-01', lang) })), 'expenses page shows the allowance start date');
   const selects = (html: string) => (html.match(/class="cur-select"/g) || []).length;
   assert.equal(selects(out.overview), 2, 'overview: separate selectors for total funds and income');
   assert.equal(selects(out.income), 3, 'income: separate selectors for total income, income this month and total funds');
@@ -85,7 +92,7 @@ for (const lang of ['en', 'fr'] as Lang[]) {
   assert.ok(out.reports.includes('<svg'), 'chart rendered');
 
   // cloud section of Settings: every status renders, with no undefined/NaN/unfilled placeholder
-  const page = (cloud: ReturnType<typeof mkCloud>) => renderToStaticMarkup(<SettingsPage t={t} lang={lang} setLang={noop} categories={cats} expenses={expenses} history={audit} cloud={cloud} openings={{ GHS: 100 }} onSaveOpenings={noopA} version="0.8.0" onAddCategory={noop} onDeleteCategory={noop} onBackup={noop} onRestore={noop} />);
+  const page = (cloud: ReturnType<typeof mkCloud>) => renderToStaticMarkup(<SettingsPage t={t} lang={lang} setLang={noop} categories={cats} expenses={expenses} history={audit} cloud={cloud} openings={{ GHS: 100 }} onSaveOpenings={noopA} renewal={{ enabled: true, useDefault: false, defaultAmount: 0 }} onSaveRenewal={noopA} version="0.8.0" onAddCategory={noop} onDeleteCategory={noop} onBackup={noop} onRestore={noop} />);
   const bad = /undefined|NaN|\[object|\{[a-z]+\}/;
   const cloudHtml: Record<string, string> = {};
   for (const st of statuses) {
@@ -119,7 +126,7 @@ for (const lang of ['en', 'fr'] as Lang[]) {
   assert.ok(cloudHtml.unknownError.includes(t.cloudErr_unknown), 'unknown error falls back to the generic message');
 }
 const fr = messages.fr;
-const frOverview = renderToStaticMarkup(<OverviewPage t={fr} lang="fr" month="2026-11" setMonth={noop} expenses={expenses} budgets={budgets} categories={cats} incomes={incomes} conversions={conversions} live={null} closing={closing} opening={opening} activity={audit} curOf={curOf} setCur={noop} onRefreshLive={noop} />);
+const frOverview = renderToStaticMarkup(<OverviewPage t={fr} lang="fr" month="2026-11" setMonth={noop} expenses={expenses} allowances={allowances} categories={cats} incomes={incomes} conversions={conversions} live={null} closing={closing} opening={opening} activity={audit} curOf={curOf} setCur={noop} onRefreshLive={noop} />);
 assert.ok(frOverview.includes('Fonds totaux') && frOverview.includes('taux du marché en direct ne peuvent pas') && frOverview.includes('Modification · dépense') && frOverview.includes('Ajout · échange'), 'French overview');
 assert.ok(frOverview.includes('Création') === false);
 console.log('render tests passed (en + fr)');

@@ -57,6 +57,7 @@ assert.equal(catsOut.find((c) => c.name === 'Food & groceries')!.id, 1);        
 assert.equal(byTitle('Orphan').length, 1); assert.equal(byTitle('Orphan')[0].categoryId, 6);                       // an expense with a dangling category falls back to "Other"
 assert.equal(new Set(ex.map((e) => e.id)).size, ex.length);
 const bud = pr.tables.budgets as R[]; assert.equal(bud.length, 1); assert.equal(bud[0].id, budgetId('2026-08')); assert.equal(bud[0].amount, 1200);   // one budget per month
+const alw = pr.tables.allowances as R[]; assert.equal(alw.length, 1); assert.deepEqual([alw[0].startDate, alw[0].endDate, alw[0].amount], ['2026-08-01', '2026-08-31', 1200]);   // old backup: the month's budget became an allowance
 const aud = pr.tables.auditLog as R[]; assert.equal(aud[0].entityId, tpl.id); assert.equal(aud[1].entityId, custom.id);
 assert.ok(((pr.tables.income as R[])[0].id as number) >= 1000);
 

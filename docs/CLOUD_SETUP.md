@@ -102,3 +102,9 @@ Supabase's built-in e-mail sender is **rate limited** (only a few e-mails per ho
 | That invite code is not valid | Ask the owner for the current code; it changes when regenerated |
 | Your session expired | Sign in again |
 | No internet connection | Nothing is lost; the app syncs when you are back online |
+
+## Upgrading a project that was set up before allowances
+
+If your Supabase project was created with an older `supabase/setup.sql`, run `supabase/add-allowances.sql` once in the SQL editor
+before any device syncs with the allowances version. Without it, Supabase refuses allowance records and sync reports an error.
+Projects created with the current `setup.sql` already have it. The script is safe to run more than once.

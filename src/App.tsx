@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { budgetId, db, logAudit, newId, seedCategories } from './lib/db';
+import { db, logAudit, newId, seedCategories } from './lib/db';
+import { RENEWAL_KEY, changeAmount, checkEndDate, checkNewAmount, migrateBudgets, planNewAllowance, readRenewal, runRenewal, type NewAllowanceInput, type RenewalRule } from './lib/allowances';
 import { messages, type Lang } from './lib/i18n';
 import {
-  CURRENCIES, budgetFor, diffFields, downloadJson, fundsAsOf, generateRecurring, prevMonth, syncOverruns, thisMonth, today,
+  CURRENCIES, diffFields, downloadJson, fundsAsOf, generateRecurring, prevMonth, syncOverruns, thisMonth, today,
 } from './lib/finance';
-import type { Conversion, Expense, ExpenseCategory, Frequency, IncomeEntry } from './types/finance';
+import type { Allowance, Conversion, Expense, ExpenseCategory, Frequency, IncomeEntry } from './types/finance';
 import { LayoutDashboard, ReceiptText, Wallet, TrendingUp, ChartNoAxesColumn, Settings, Plus, Languages, CircleDollarSign, X, Menu } from 'lucide-react';
 import { CategoryModal, ConversionModal, ExpenseModal, IncomeModal, type ConversionForm } from './components/Modals';
 import { fill } from './components/Common';
@@ -70,7 +71,9 @@ export default function App() {
   const categories = useLiveQuery(() => db.categories.toArray(), []) ?? [];
   const expenses = useLiveQuery(() => db.expenses.orderBy('date').reverse().toArray(), []) ?? [];
   const incomes = useLiveQuery(() => db.income.orderBy('date').reverse().toArray(), []) ?? [];
-  const budgets = useLiveQuery(() => db.budgets.toArray(), []) ?? [];
+  const allowances = useLiveQuery(() => db.allowances.toArray(), []) ?? [];
+  const renewalRow = useLiveQuery(() => db.settings.get(RENEWAL_KEY), []);
+  const renewal = useMemo(() => readRenewal(renewalRow?.value), [renewalRow]);
   const conversions = useLiveQuery(() => db.conversions.toArray(), []) ?? [];
   const openingRow = useLiveQuery(() => db.settings.get('openings'), []);
   const openings = useMemo(() => (openingRow?.value ?? {}) as Record<string, number>, [openingRow]);
@@ -81,22 +84,24 @@ export default function App() {
   useEffect(() => {
     (async () => {
       await seedCategories();
+      await migrateBudgets();            // once per device: old monthly budgets become allowances
+      await runRenewal(today());
       const n = await generateRecurring();
       if (n > 0) setAutoNotice(n);
     })().catch(console.error);
   }, []);
 
   /* Keep the automatic "budget overrun" entries in step with expenses and budgets (no-op when nothing changed). */
-  useEffect(() => { syncOverruns().catch(console.error); }, [expenses, budgets]);
+  useEffect(() => { syncOverruns().catch(console.error); }, [expenses, allowances]);
+  /* Take the automatic renewal when the last allowance has ended (also reacts to the Settings switch and to a new day). */
+  useEffect(() => { runRenewal(today()).catch(console.error); }, [allowances, renewalRow]);
 
   /* Family funds: carried over month to month. Exchanges use the family's own rate; nothing here uses market rates. */
-  const fundsInput = useMemo(() => ({ openings, incomes, conversions, expenses, budgets }), [openings, incomes, conversions, expenses, budgets]);
+  const fundsInput = useMemo(() => ({ openings, incomes, conversions, expenses, allowances }), [openings, incomes, conversions, expenses, allowances]);
   const closing = useMemo(() => fundsAsOf(month, fundsInput), [month, fundsInput]);
   const opening = useMemo(() => fundsAsOf(prevMonth(month), fundsInput), [month, fundsInput]);
   const currentFunds = useMemo(() => fundsAsOf(thisMonth(), fundsInput), [fundsInput]);
 
-  const budget = budgetFor(month, budgets);
-  const savedThisMonth = budgets.some((b) => b.month === month);
   const catName = (id: number) => categories.find((c) => c.id === id)?.name ?? '';
 
   /* ---------- expenses ---------- */
@@ -155,15 +160,44 @@ export default function App() {
     await logAudit({ entity: 'category', entityId: c.id, action: 'deleted', title: c.name });
   }
 
-  /* ---------- budget ---------- */
-  async function saveBudget(amount: number) {
-    // One budget per month with an id derived from the month: two devices setting the same month's budget end up with one record.
-    await db.transaction('rw', db.budgets, async () => {
-      await db.budgets.where('month').equals(month).delete();
-      await db.budgets.put({ id: budgetId(month), month, amount, currency: 'GHS' });
+  /* ---------- allowances ---------- */
+  async function createAllowance(input: NewAllowanceInput) {
+    const [list, exps] = await Promise.all([db.allowances.toArray(), db.expenses.toArray()]);
+    const plan = planNewAllowance(list, input, exps, new Date().toISOString());
+    if (!plan.ok) return plan.reason;
+    await db.transaction('rw', db.allowances, db.auditLog, async () => {
+      if (plan.closed) await db.allowances.put(plan.closed);   // the open one ends the day before; its unspent money is back in funds
+      await db.allowances.put(plan.create);
+      await logAudit({ entity: 'allowance', entityId: plan.create.id!, action: 'created', title: plan.create.startDate, changes: [{ field: 'amount', from: '', to: String(plan.create.amount) }] });
     });
+    return 'ok' as const;
   }
-  async function removeBudget() { await db.budgets.where('month').equals(month).delete(); }
+  async function changeAllowanceAmount(a: Allowance, amount: number) {
+    const [fresh, exps] = await Promise.all([db.allowances.get(a.id!), db.expenses.toArray()]);
+    if (!fresh || (fresh.endDate && fresh.endDate < today())) return 'invalid' as const;
+    const check = checkNewAmount(fresh, amount, exps);
+    if (check !== 'ok') return check;
+    const next = changeAmount(fresh, amount, today(), new Date().toISOString());   // an increase leaves funds, a decrease returns to funds, from today on
+    if (next === fresh) return 'ok' as const;
+    await db.allowances.put(next);
+    await logAudit({ entity: 'allowance', entityId: fresh.id!, action: 'updated', title: fresh.startDate, changes: [{ field: 'amount', from: String(fresh.amount), to: String(next.amount) }] });
+    return 'ok' as const;
+  }
+  async function setAllowanceEnd(a: Allowance, endDate: string) {
+    const [fresh, list] = await Promise.all([db.allowances.get(a.id!), db.allowances.toArray()]);
+    if (!fresh) return 'invalid' as const;
+    const check = checkEndDate(list, fresh, endDate);
+    if (check !== 'ok') return check;
+    await db.allowances.put({ ...fresh, endDate, updatedAt: new Date().toISOString() });
+    await logAudit({ entity: 'allowance', entityId: fresh.id!, action: 'updated', title: fresh.startDate, changes: [{ field: 'endDate', from: fresh.endDate, to: endDate }] });
+    return 'ok' as const;
+  }
+  async function deleteAllowance(a: Allowance) {
+    if (!confirm(t.alwConfirmDelete)) return;
+    await db.allowances.delete(a.id!);
+    await logAudit({ entity: 'allowance', entityId: a.id!, action: 'deleted', title: a.startDate });
+  }
+  async function saveRenewal(rule: RenewalRule) { await db.settings.put({ key: RENEWAL_KEY, value: rule }); }
 
   /* ---------- income ---------- */
   async function saveIncome(form: HTMLFormElement) {
@@ -266,15 +300,15 @@ export default function App() {
           </div>
         </header>
         {autoNotice > 0 && <div className="banner info" role="status">↻ {fill(t.recurringAdded, { n: autoNotice })}<button className="x" onClick={() => setAutoNotice(0)} aria-label={t.dismiss}><X size={14} /></button></div>}
-        {page === 'overview' && <OverviewPage t={t} lang={lang} month={month} setMonth={setMonth} expenses={expenses} budgets={budgets} categories={categories} incomes={incomes} conversions={conversions}
+        {page === 'overview' && <OverviewPage t={t} lang={lang} month={month} setMonth={setMonth} expenses={expenses} allowances={allowances} categories={categories} incomes={incomes} conversions={conversions}
           live={live} closing={closing} opening={opening} activity={recent} curOf={curOf} setCur={setCur} onRefreshLive={() => void refreshLive(true)} />}
-        {page === 'expenses' && <ExpensesPage t={t} lang={lang} month={month} setMonth={setMonth} expenses={expenses} budgets={budgets} categories={categories} activity={recent}
+        {page === 'expenses' && <ExpensesPage t={t} lang={lang} month={month} setMonth={setMonth} expenses={expenses} allowances={allowances} categories={categories} activity={recent}
           onAdd={openAdd} onEdit={(e) => { setEditing(e); setExpenseModal(true); }} onDelete={deleteExpense} onAddCategory={() => setCategoryModal(true)} />}
-        {page === 'budget' && <BudgetPage t={t} lang={lang} month={month} setMonth={setMonth} expenses={expenses} categories={categories} budget={{ ...budget, saved: savedThisMonth }} onSave={saveBudget} onRemove={removeBudget} />}
+        {page === 'budget' && <BudgetPage t={t} lang={lang} month={month} setMonth={setMonth} expenses={expenses} categories={categories} allowances={allowances} today={today()} onCreate={createAllowance} onChangeAmount={changeAllowanceAmount} onSetEnd={setAllowanceEnd} onDelete={deleteAllowance} />}
         {page === 'income' && <IncomePage t={t} lang={lang} incomes={incomes} conversions={conversions} live={live} funds={currentFunds} curOf={curOf} setCur={setCur} onRefreshLive={() => void refreshLive(true)} onAddIncome={openAddIncome} onEditIncome={(i) => { setEditingIncome(i); setIncomeModal(true); }}
           onDeleteIncome={deleteIncome} onAddExchange={() => { setEditingExchange(null); setExchangeModal(true); }} onEditExchange={(c) => { setEditingExchange(c); setExchangeModal(true); }} onDeleteExchange={deleteExchange} />}
-        {page === 'reports' && <ReportsPage t={t} lang={lang} budgets={budgets} expenses={expenses} categories={categories} incomes={incomes} live={live} curOf={curOf} setCur={setCur} onRefreshLive={() => void refreshLive(true)} />}
-        {page === 'settings' && <SettingsPage t={t} lang={lang} setLang={changeLang} categories={categories} expenses={expenses} history={history} openings={openings} cloud={cloud} onSaveOpenings={saveOpenings} version={APP_VERSION}
+        {page === 'reports' && <ReportsPage t={t} lang={lang} allowances={allowances} expenses={expenses} categories={categories} incomes={incomes} live={live} curOf={curOf} setCur={setCur} onRefreshLive={() => void refreshLive(true)} />}
+        {page === 'settings' && <SettingsPage t={t} lang={lang} setLang={changeLang} categories={categories} expenses={expenses} history={history} openings={openings} cloud={cloud} onSaveOpenings={saveOpenings} renewal={renewal} onSaveRenewal={saveRenewal} version={APP_VERSION}
           onAddCategory={() => setCategoryModal(true)} onDeleteCategory={deleteCategory} onBackup={() => void backup()} onRestore={(f) => void restore(f)} />}
         <footer className="footer"><span>© 2026 Family Finance Manager · v{APP_VERSION}</span><span className="local-badge">● {t.localNotice}</span></footer>
       </main>

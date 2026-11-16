@@ -30,7 +30,7 @@ create table if not exists public.members (
 -- so that devices that were offline still learn about the deletion.
 create table if not exists public.records (
   family_id  uuid not null references public.families (id) on delete cascade,
-  tbl        text not null check (tbl in ('expenses', 'categories', 'auditLog', 'budgets', 'income', 'conversions', 'settings')),
+  tbl        text not null check (tbl in ('expenses', 'categories', 'auditLog', 'budgets', 'allowances', 'income', 'conversions', 'settings')),
   id         text not null check (length(id) between 1 and 200),
   data       jsonb,
   deleted    boolean not null default false,
