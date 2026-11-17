@@ -21,7 +21,7 @@ import IncomePage from './pages/IncomePage';
 import ReportsPage from './pages/ReportsPage';
 import SettingsPage from './pages/SettingsPage';
 
-export const APP_VERSION = '0.8.0';
+export const APP_VERSION = '1.0.0';
 type Page = 'overview' | 'expenses' | 'budget' | 'income' | 'reports' | 'settings';
 const str = (fd: FormData, k: string) => String(fd.get(k) ?? '').trim();
 

@@ -1,4 +1,4 @@
-# Cloud setup (Supabase) — Family Finance Manager 0.8.0
+# Cloud setup (Supabase) — Family Finance Manager 1.0.0
 
 Cloud sync is optional. Without it the app works exactly as before, with the data on one device. With it, everyone in the family signs in and sees the same data on every phone, tablet and computer, and edits made offline are sent when the device is back online.
 

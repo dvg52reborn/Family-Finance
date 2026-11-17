@@ -1,4 +1,4 @@
-# Family Finance Manager v0.8.0
+# Family Finance Manager v1.0.0
 
 React + TypeScript + Vite. Data is stored on this device (IndexedDB via Dexie). Optional family sync through your own Supabase project (0.8.0).
 
@@ -34,7 +34,7 @@ Currencies: GHS, XOF, USD, EUR, GBP, NGN, CAD.
 
 ## Fresh start and backups
 0.8.0 uses a new database (`family-finance-manager-v7`); data stored in the browser by earlier versions is not read automatically, and the old database is left untouched (clear the site data to remove it).
-To bring old data in on purpose, use **Settings > Restore backup** with a backup file from any earlier version (0.4 onward, including 0.7.1). Old files are converted on the way in: saved exchange rates are skipped (the app now uses live market rates), every record gets a new unique id (links between records are kept), and recurring expenses that fell due since the backup are created. Restoring replaces the data on the device. Damaged files and files from a newer version are rejected without changing anything. Backups made by 0.8.0 use format 7.
+To bring old data in on purpose, use **Settings > Restore backup** with a backup file from any earlier version (0.4 onward, including 0.7.1). Old files are converted on the way in: saved exchange rates are skipped (the app now uses live market rates), every record gets a new unique id (links between records are kept), and recurring expenses that fell due since the backup are created. Restoring replaces the data on the device. Damaged files and files from a newer version are rejected without changing anything. Backups made by 0.8.0 and later (including 1.0.0) use format 7.
 
 Records no longer use the numbers 1, 2, 3...: ids are unique, so data from several devices can never collide. Built-in categories keep ids 1-6 (the "Budget overrun" category is 7), and generated records (recurring occurrences, budget overruns, one budget per month) get the same id on every device, so two devices never create duplicates of them.
 
