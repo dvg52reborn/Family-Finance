@@ -90,6 +90,12 @@ for (const lang of ['en', 'fr'] as Lang[]) {
   assert.ok(out.reports.includes('NGN'), 'report currency applied');
   assert.ok(out.overview.includes(t.liveRatesUpdated.split('{')[0].trim()), 'live-rate timestamp shown');
   assert.ok(out.reports.includes('<svg'), 'chart rendered');
+  // each form's submit button is labelled for what it saves (the income form once said "Save expense")
+  const submitLabel = (html: string) => html.match(/<button type="submit" class="primary">(?:<svg.*?<\/svg>)?([^<]*)<\/button>/)?.[1];
+  assert.equal(submitLabel(renderToStaticMarkup(<IncomeModal t={t} lang={lang} income={null} onClose={noop} onSave={noopA} />)), t.save, `${lang}: income form save button`);
+  assert.equal(submitLabel(renderToStaticMarkup(<ConversionModal t={t} lang={lang} conversion={null} onClose={noop} onSave={noopA} />)), t.save, `${lang}: exchange form save button`);
+  assert.equal(submitLabel(renderToStaticMarkup(<ExpenseModal t={t} lang={lang} categories={cats} expense={null} onClose={noop} onSave={noopA} />)), t.saveExpense, `${lang}: expense form save button`);
+  if (lang === 'en') assert.ok(!renderToStaticMarkup(<IncomeModal t={t} lang={lang} income={null} onClose={noop} onSave={noopA} />).includes('Save expense'), 'income form does not say Save expense');
 
   // cloud section of Settings: every status renders, with no undefined/NaN/unfilled placeholder
   const page = (cloud: ReturnType<typeof mkCloud>) => renderToStaticMarkup(<SettingsPage t={t} lang={lang} setLang={noop} categories={cats} expenses={expenses} history={audit} cloud={cloud} openings={{ GHS: 100 }} onSaveOpenings={noopA} renewal={{ enabled: true, useDefault: false, defaultAmount: 0 }} onSaveRenewal={noopA} version="0.8.0" onAddCategory={noop} onDeleteCategory={noop} onBackup={noop} onRestore={noop} />);
