@@ -66,7 +66,7 @@ export function ExpenseModal(p: { t: Translation; lang: Lang; categories: Expens
           )}
           <label className="check full"><input name="outsideBudget" type="checkbox" defaultChecked={expense?.outsideBudget || false} />{t.outsideBudget}</label>
         </div>
-        <Actions t={t} onClose={p.onClose} icon />
+        <Actions t={t} onClose={p.onClose} icon label={t.saveExpense} />
       </form>
     </Shell>
   );
