@@ -25,11 +25,8 @@ export default defineConfig({
         ],
       },
       workbox: {
-        globPatterns: ['**/*.{js,css,html,png,svg,webmanifest}'],
-        // Fonts are cached after first use so the app looks the same offline. Market-rate requests are never cached by the worker.
-        runtimeCaching: [
-          { urlPattern: /^https:\/\/fonts\.(googleapis|gstatic)\.com\/.*/i, handler: 'CacheFirst', options: { cacheName: 'fonts', expiration: { maxEntries: 20, maxAgeSeconds: 31536000 } } },
-        ],
+        // The fonts are part of the app files (woff2), so they are saved for offline use with everything else. Market-rate requests are never cached by the worker.
+        globPatterns: ['**/*.{js,css,html,png,svg,webmanifest,woff2}'],
       },
     }),
   ],
